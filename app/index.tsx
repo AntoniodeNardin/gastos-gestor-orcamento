@@ -1,106 +1,149 @@
 import React, { useState, useEffect } from "react";
-import { Text, TextInput, View, Button, StyleSheet, FlatList, TouchableOpacity } from "react-native";
+import { Text, TextInput, View, Button, StyleSheet, FlatList, TouchableOpacity, Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Definindo o tipo para a despesa
 interface Despesa {
-  id: string;
+  id: number;
   descricao: string;
   valor: string;
 }
 
+const API_URL = "http://127.0.0.1:8000/api/v1";
+
 const Index: React.FC = () => {
   const [descricao, setDescricao] = useState<string>("");
   const [valor, setValor] = useState<string>("");
-  const [despesas, setDespesas] = useState<Despesa[]>([]); // Estado para armazenar as despesas
+  const [despesas, setDespesas] = useState<Despesa[]>([]);
+  const [token, setToken] = useState<string>("");
 
-  // Função para carregar as despesas do AsyncStorage
-  const carregarDespesas = async () => {
+  // Carrega o token salvo no AsyncStorage
+  const carregarToken = async () => {
+    const tokenSalvo = await AsyncStorage.getItem("token");
+    if (tokenSalvo) {
+      setToken(tokenSalvo);
+    } else {
+      Alert.alert("Erro", "Token de autenticação não encontrado.");
+    }
+  };
+
+  // Busca despesas da API
+  const buscarDespesas = async () => {
     try {
-      const despesasSalvas = await AsyncStorage.getItem("despesas");
-      if (despesasSalvas) {
-        setDespesas(JSON.parse(despesasSalvas)); // Carregar as despesas salvas
+      const response = await fetch(`${API_URL}/despesas`, {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const json = await response.json();
+      setDespesas(json.data || []);
+    } catch (error) {
+      console.error("Erro ao buscar despesas:", error);
+    }
+  };
+
+  // Adiciona uma nova despesa
+  const adicionarDespesa = async () => {
+    if (!descricao || !valor) {
+      Alert.alert("Atenção", "Preencha todos os campos.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/despesas`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          descricao,
+          valor: parseFloat(valor),
+          data: new Date().toISOString().split("T")[0],
+        }),
+      });
+
+      const json = await response.json();
+
+      if (response.ok) {
+        setDespesas((prev) => [...prev, json.data]);
+        setDescricao("");
+        setValor("");
+      } else {
+        Alert.alert("Erro", json.message || "Erro ao adicionar despesa.");
       }
     } catch (error) {
-      console.error("Erro ao carregar despesas:", error);
+      console.error("Erro ao adicionar despesa:", error);
     }
   };
 
-  // Função para salvar as despesas no AsyncStorage
-  const salvarDespesas = async (novasDespesas: Despesa[]) => {
+  // Remove uma despesa
+  const removerDespesa = async (id: number) => {
     try {
-      await AsyncStorage.setItem("despesas", JSON.stringify(novasDespesas));
+      const response = await fetch(`${API_URL}/despesas/${id}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        setDespesas((prev) => prev.filter((d) => d.id !== id));
+      } else {
+        Alert.alert("Erro", "Não foi possível remover a despesa.");
+      }
     } catch (error) {
-      console.error("Erro ao salvar despesas:", error);
+      console.error("Erro ao remover despesa:", error);
     }
   };
 
-  // Função para adicionar despesa
-  const adicionarDespesa = () => {
-    if (descricao && valor) {
-      const novaDespesa: Despesa = { id: Date.now().toString(), descricao, valor };
-
-      // Atualizando o estado com a nova despesa
-      const novasDespesas = [...despesas, novaDespesa];
-      setDespesas(novasDespesas);
-
-      // Salvando as despesas no AsyncStorage
-      salvarDespesas(novasDespesas);
-
-      // Limpando os campos após adicionar a despesa
-      setDescricao("");
-      setValor("");
-    } else {
-      alert("Por favor, preencha todos os campos.");
-    }
-  };
-
-  // Função para remover despesa
-  const removerDespesa = (id: string) => {
-    const novasDespesas = despesas.filter((despesa) => despesa.id !== id);
-    setDespesas(novasDespesas);
-    salvarDespesas(novasDespesas); // Atualizar AsyncStorage
-  };
-
-  // Carregar as despesas ao montar o componente
+  // Carrega o token e busca as despesas ao montar o componente
   useEffect(() => {
-    carregarDespesas();
+    const iniciar = async () => {
+      await carregarToken();
+    };
+    iniciar();
   }, []);
+
+  // Quando o token estiver carregado, buscar as despesas
+  useEffect(() => {
+    if (token) {
+      buscarDespesas();
+    }
+  }, [token]);
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Despesas</Text>
 
-      {/* Campo de descrição */}
       <TextInput
         style={styles.input}
         placeholder="Descrição"
         value={descricao}
-        onChangeText={(text) => setDescricao(text)}
+        onChangeText={setDescricao}
       />
 
-      {/* Campo de valor */}
       <TextInput
         style={styles.input}
         placeholder="Valor"
         keyboardType="numeric"
         value={valor}
-        onChangeText={(text) => setValor(text)}
+        onChangeText={setValor}
       />
 
-      {/* Botão para adicionar a despesa */}
       <Button title="Adicionar Despesa" onPress={adicionarDespesa} />
 
-      {/* Lista de despesas */}
       <FlatList
         data={despesas}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{item.descricao}</Text>
             <Text style={styles.cardValue}>R$ {item.valor}</Text>
-
-            {/* Botão de remoção */}
             <TouchableOpacity
               style={styles.removeButton}
               onPress={() => removerDespesa(item.id)}
@@ -118,7 +161,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    backgroundColor: "#f8f8f8", // Cor de fundo
+    backgroundColor: "#f8f8f8",
   },
   title: {
     fontSize: 24,
@@ -144,7 +187,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 4,
-    elevation: 3, // Adiciona sombra no Android
+    elevation: 3,
   },
   cardTitle: {
     fontSize: 18,
